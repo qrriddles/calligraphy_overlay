@@ -1,27 +1,31 @@
-# Mindflow Board (v1.1)
+# 书影对照 · Calligraphy Overlay
 
-A local-first visual mindmapper and flowchart board, written as a single HTML application.
+A private, browser-only tool for visually comparing a teacher's Chinese calligraphy model with your own attempt.
 
 ## Features
 
-- Pan and zoom, including two-finger pinch gestures on touchscreens
-- Draggable, resizable nodes with shapes, colors, notes, and optional hyperlinks
-- Straight, curved, and orthogonal connectors with arrow directions
-- Automatic local saving through browser `localStorage`
-- JSON backup and restore; PNG and SVG image export
-- Mobile export dialog with share/save and preview alternatives
+- Upload or capture model and attempt photographs; crop each image to a character
+- Overlay / side-by-side comparisons, pinch scaling, dragging, rotation and skew
+- Opacity, tint, contrast, paper cleanup, and independent ink/paper opacity for your attempt
+- Fixed 田字格 / 米字格, blend modes and PNG export
+- Responsive layout for mobile and desktop
 
-## Deploy on GitHub Pages
+## Run locally
 
-1. Create a repository (for example, `mindflow`).
-2. Upload `index.html`, `README.md`, and `.nojekyll` to the repository root.
-3. In **Settings → Pages**, choose **Deploy from a branch**, branch `main`, folder `/ (root)`, then Save.
-4. Open `https://YOUR_USERNAME.github.io/mindflow/` after deployment.
+Open `index.html` in a modern browser. No installation or network connection is required.
 
-## Privacy and backups
+## Publish on GitHub Pages
 
-The app has no backend. Boards are stored in the browser's `localStorage` and are **not synced across devices**. Export JSON backups regularly. Opening the hosted version uses a different storage origin from a local HTML file, so use JSON export/import to migrate existing boards. A public GitHub Pages site exposes the application source, **not** your locally saved boards.
+1. Create a public repository, for example `calligraphy_overlay`.
+2. Upload `index.html` (and optionally this README and `.nojekyll`) to the repository root.
+3. Go to **Settings → Pages**, under **Build and deployment** choose **Deploy from a branch**.
+4. Select branch **main** and folder **/(root)**, then save.
+5. When the deployment is live, visit `https://YOUR-USERNAME.github.io/calligraphy_overlay/`.
 
-Tailwind CSS is requested from a CDN, but local CSS provides the interface styling when offline. Browser download/share behavior can vary, especially in embedded browsers.
+## Privacy
 
-*Vibe-coded with ChatGPT in Oct 2026, for individual use only.*
+Photos are processed in your browser and are not uploaded by this application. The site itself is public if published on public GitHub Pages. Export your comparison PNG before closing the page.
+
+## Notes
+
+Version 1.5 (October 2026). Developed with ChatGPT. This project has not been tested on every mobile browser and device.
