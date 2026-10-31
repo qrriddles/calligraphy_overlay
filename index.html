@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light" />
+  <title>Mindflow — Local Visual Board</title>
+  <!-- Mindflow v1.1: mobile pinch zoom, safe export chooser, mobile touch controls. -->
+  <!-- Optional Tailwind utilities. The local CSS below provides an offline fallback. -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:#233047; background:#f6f8fc; }
+    * { box-sizing:border-box; }
+    html,body { width:100%;height:100%;margin:0;overflow:hidden; }
+    button,input,textarea,select { font:inherit; }
+    button { cursor:pointer; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+    /* Touch gestures are captured by the board only, not buttons or form fields. */
+    input,textarea,select { touch-action:manipulation; }
+    button:disabled { opacity:.45;cursor:not-allowed; }
+    button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:3px solid #93c5fd;outline-offset:2px; }
+    .app { display:flex;flex-direction:column;height:100%;height:100dvh;min-height:0; }
+    .topbar { flex:none;min-height:67px;display:flex;align-items:center;gap:14px;padding:10px 18px;background:#fff;border-bottom:1px solid #e5eaf2;z-index:50;box-shadow:0 1px 8px #24364a08; }
+    .brand { display:flex;align-items:center;gap:9px;white-space:nowrap;flex:none; }
+    .brand-mark { display:grid;place-items:center;width:33px;height:33px;border-radius:11px;background:#335eea;color:#fff;font-size:17px;font-weight:800; }
+    .brand-title { font-weight:800;letter-spacing:-.55px;font-size:18px; }
+    .brand-small { display:block;font-size:10px;color:#8d9ab0;letter-spacing:1px;text-transform:uppercase;font-weight:700; }
+    .toolbar { display:flex;align-items:center;gap:5px;flex:1;min-width:0;overflow-x:auto;padding:2px 1px;scrollbar-width:thin; }
+    .tool { display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:37px;padding:8px 11px;border:1px solid transparent;background:transparent;border-radius:9px;font-size:12.5px;font-weight:650;color:#516078;white-space:nowrap;transition:background .13s,border-color .13s; }
+    .tool:hover { background:#eef3ff;color:#2b4fc2; }
+    .tool.active { background:#e9efff;color:#3155cc;border-color:#cbd8ff; }
+    .tool.primary { background:#315dea;color:white;box-shadow:0 3px 10px #315dea22; }
+    .tool.primary:hover { background:#274fd4; }
+    .tool.danger:hover { background:#fff0f0;color:#d04040; }
+    .tool svg,.icon-btn svg { width:17px;height:17px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round; }
+    .sep { height:25px;width:1px;background:#e4e9f1;margin:0 5px;flex:none; }
+    .menu-wrap { position:relative;flex:none; }
+    /* Fixed-position popovers escape the scroll-clipped toolbar on mobile. */
+    .menu { display:none;position:fixed;top:var(--menu-top,55px);left:var(--menu-left,12px);width:238px;max-width:calc(100vw - 16px);z-index:90;background:white;padding:6px;border:1px solid #dde5f1;box-shadow:0 14px 35px #23304722;border-radius:12px; }
+    .menu.right { right:auto; }
+    .menu.open { display:block; }
+    .menu button { width:100%;text-align:left;border:0;background:transparent;border-radius:7px;padding:9px 10px;color:#334155;font-size:13px; }
+    .menu button:hover { background:#f1f5ff;color:#3155cc; }
+    .menu-heading { color:#8a97a9;font-size:10px;font-weight:800;letter-spacing:1px;padding:9px 10px 5px;text-transform:uppercase; }
+    .status { display:flex;align-items:center;gap:6px;font-size:11px;color:#7890a2;flex:none;white-space:nowrap; }
+    .status-dot { height:7px;width:7px;border-radius:50%;background:#26ae83; }
+    .status-dot.error { background:#eb685f; }
+    .work-area { flex:1;min-height:0;display:flex;position:relative; }
+    .workspace { flex:1;min-width:0;position:relative;overflow:hidden;background:#f8fafd;touch-action:none;cursor:grab;outline:none; }
+    .workspace.tool-select { cursor:default; }
+    .workspace.tool-connect { cursor:crosshair; }
+    .workspace.tool-hand { cursor:grab; }
+    .workspace.dragging { cursor:grabbing !important; }
+    .dot-grid { position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(#cbd5e1 1px,transparent 1px);background-size:24px 24px;opacity:.65; }
+    #wires { position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none; }
+    .wire { fill:none;stroke:#64748b;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none; }
+    .wire.selected { stroke:#315dea;stroke-width:3; }
+    .wire-hit { fill:none;stroke:transparent;stroke-width:17;pointer-events:stroke;cursor:pointer; }
+    #world { position:absolute;top:0;left:0;width:0;height:0;transform-origin:0 0;overflow:visible; }
+    .node { position:absolute;display:flex;align-items:center;justify-content:center;padding:0;user-select:none;cursor:move;touch-action:none;isolation:isolate; }
+    .node::after { content:"";position:absolute;inset:-4px;border-radius:12px;border:2px solid transparent;pointer-events:none; }
+    .node.selected::after { border-color:#5480f7; }
+    .node.connect-source::after { border-color:#12a585;border-style:dashed; }
+    .node-surface { position:absolute;inset:0;background:var(--fill,#eff6ff);border:1.5px solid var(--outline,#bfdbfe);border-radius:12px;box-shadow:0 4px 18px #22304b12; }
+    .node-content { position:relative;z-index:1;width:100%;min-width:0;padding:12px 16px 15px;max-height:100%;overflow:hidden;text-align:center;pointer-events:none; }
+    .node-title { display:block;width:100%;font-size:15px;line-height:1.32;font-weight:750;letter-spacing:-.2px;color:#26364a;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow-wrap:anywhere;pointer-events:auto;cursor:inherit; }
+    .node-notes { margin-top:5px;line-height:1.35;font-size:11.5px;color:#637184;white-space:pre-wrap;overflow-wrap:anywhere;max-height:75px;overflow:hidden; }
+    .node-title[contenteditable="true"] { display:block;white-space:normal;outline:2px dashed #5987f7;background:#fffdf2;cursor:text;border-radius:3px;user-select:text; }
+    .node-link { position:absolute;z-index:3;right:8px;top:8px;width:25px;height:25px;display:grid;place-items:center;border-radius:8px;border:1px solid #ffffffcf;background:#ffffffed;color:#3864c6;box-shadow:0 1px 5px #23304720;cursor:pointer; }
+    .node-link:hover { background:#e8efff; }
+    .node-link.invalid { color:#bb674e; }
+    .node-link svg { width:13px;height:13px;stroke:currentColor;stroke-width:2;fill:none;stroke-linejoin:round;stroke-linecap:round; }
+    .resize-handle { position:absolute;z-index:4;right:-7px;bottom:-7px;width:17px;height:17px;background:#fff;border:2px solid #5079e8;border-radius:5px;box-shadow:0 1px 5px #50608035;cursor:nwse-resize;display:none; }
+    .node.selected .resize-handle { display:block; }
+    .shape-rect .node-surface { border-radius:5px; }
+    .shape-oval .node-surface { border-radius:50%; }
+    .shape-oval .node-content { padding-left:20%;padding-right:20%; }
+    .shape-pill .node-surface { border-radius:999px; }
+    .shape-sticky .node-surface { border-radius:4px;clip-path:polygon(0 0,86% 0,100% 14%,100% 100%,0 100%); }
+    .shape-sticky .node-surface::after { content:"";position:absolute;right:0;top:0;width:14%;height:14%;background:#ffffff85; }
+    .shape-diamond .node-surface { border:none;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);border-radius:0; }
+    .shape-diamond .node-content { padding-left:24%;padding-right:24%; }
+    .shape-data .node-surface { border:none;clip-path:polygon(13% 0,100% 0,87% 100%,0 100%);border-radius:0; }
+    .shape-data .node-content { padding-left:17%;padding-right:17%; }
+    .shape-document .node-surface { border-radius:5px 5px 24% 10%; }
+    .shape-document .node-content { padding-bottom:19px; }
+    .canvas-controls { position:absolute;left:17px;bottom:18px;display:flex;align-items:center;gap:2px;background:#fff;padding:5px;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 4px 16px #24364a16;z-index:5; }
+    .icon-btn { width:31px;height:31px;border:none;border-radius:7px;background:transparent;display:grid;place-items:center;color:#64748b; }
+    .icon-btn:hover { background:#eef3ff;color:#3256c8; }
+    .zoom-value { color:#516078;font-size:11px;font-weight:750;min-width:44px;text-align:center; }
+    .hint { position:absolute;top:16px;left:16px;z-index:3;max-width:min(460px,calc(100% - 32px));font-size:11.5px;padding:8px 12px;background:#ffffffdd;color:#718098;border:1px solid #e7ecf4;border-radius:10px;pointer-events:none;box-shadow:0 2px 9px #2933460a; }
+    .panel { width:300px;flex:none;background:#fff;border-left:1px solid #e4e9f1;overflow-y:auto;z-index:10;padding:20px;scrollbar-width:thin; }
+    .panel-header { display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:17px; }
+    .panel h2 { font-size:14px;letter-spacing:-.2px;margin:0;font-weight:800;color:#26354d; }
+    .subtle { font-size:11.5px;color:#8996a9;line-height:1.5; }
+    .field { display:block;margin:14px 0; }
+    .field-label { display:block;color:#6d7c90;font-size:11px;font-weight:750;margin-bottom:7px; }
+    .field input,.field textarea,.field select { width:100%;border:1px solid #dfe5ee;background:#fbfcfe;color:#344256;border-radius:9px;padding:9px 10px;font-size:12.5px;outline:none; }
+    .field textarea { resize:vertical;min-height:88px;line-height:1.5; }
+    .field input:focus,.field textarea:focus,.field select:focus { border-color:#85a5f7;box-shadow:0 0 0 3px #a5bafa33; }
+    .swatches { display:flex;gap:8px;flex-wrap:wrap; }
+    .swatch { width:26px;height:26px;border-radius:8px;border:1px solid #64748b33;box-shadow:inset 0 0 0 1px #ffffff70; }
+    .swatch.on { outline:2px solid #4f71e7;outline-offset:2px; }
+    .panel-sep { border:0;border-top:1px solid #edf0f6;margin:19px 0; }
+    .outline-btn { display:flex;align-items:center;justify-content:center;width:100%;gap:6px;border:1px solid #dbe3ef;background:#fff;color:#485d76;border-radius:9px;padding:10px;font-size:12px;font-weight:700; }
+    .outline-btn:hover { background:#f4f7ff; }
+    .outline-btn.danger { color:#bf4c52; }
+    .outline-btn.danger:hover { background:#fff0f1; }
+    .empty-panel { padding-top:32px;text-align:center;color:#8996a9; }
+    .empty-icon { width:56px;height:56px;margin:0 auto 14px;display:grid;place-items:center;font-size:25px;border-radius:17px;background:#f0f4fd;color:#6a83ba; }
+    .empty-panel strong { display:block;color:#46566e;font-size:13px;margin-bottom:5px; }
+    .stats { margin-top:22px;padding:12px;border-radius:10px;background:#f6f8fc;font-size:11.5px;color:#758296;text-align:left;line-height:1.9; }
+    .mini-help { margin-top:20px;font-size:11.5px;color:#8190a3;line-height:1.8; }
+    kbd { background:#f2f5f9;padding:2px 5px;border:1px solid #e0e6ef;border-radius:4px;color:#64748b;font-size:10px; }
+    .toast { position:absolute;left:50%;bottom:22px;transform:translateX(-50%) translateY(15px);padding:11px 17px;background:#26364c;color:#fff;border-radius:11px;font-size:12px;box-shadow:0 8px 24px #2c3d5c2d;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:100;max-width:90%;text-align:center; }
+    .toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
+    .credit-note { position:absolute;right:14px;bottom:15px;z-index:4;color:#94a3b8;font-size:9px;letter-spacing:.01em;pointer-events:none;text-align:right;max-width:48%;line-height:1.4; }
+    .panel-toggle { display:none; }
+    .export-overlay { position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:#1b294a78;padding:16px; }
+    .export-card { width:min(445px,100%);max-height:calc(100dvh - 32px);overflow-y:auto;background:white;border-radius:18px;box-shadow:0 24px 70px #111c3a42;padding:22px; }
+    .export-heading { display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px; }
+    .export-heading h2 { font-size:18px;letter-spacing:-.4px;margin:0; }
+    .export-card p { margin:7px 0 14px;font-size:13px;line-height:1.6;color:#64748b; }
+    .export-filename { padding:11px;border:1px solid #e0e7f2;border-radius:10px;overflow-wrap:anywhere;background:#f7f9fc;font-size:12px;color:#344766; }
+    .export-actions { display:flex;gap:8px;flex-wrap:wrap;margin-top:16px; }
+    .export-action { flex:1;min-width:130px;min-height:44px;padding:10px 12px;border-radius:10px;border:1px solid #dbe3f0;background:white;color:#385170;font-size:13px;font-weight:750; }
+    .export-action.primary { background:#315dea;color:white;border-color:#315dea; }
+    .export-action:disabled { opacity:.5; }
+    .export-note { font-size:11.5px !important;line-height:1.6 !important;margin:12px 0 0 !important; }
+    .export-source { width:100%;min-height:100px;margin-top:12px;padding:9px;font:12px ui-monospace,monospace;border:1px solid #dee6f2;border-radius:8px; }
+    .mobile-only { display:none; }
+    .close-panel { display:none; }
+    [hidden] { display:none !important; }
+    @media(max-width:1030px) { .brand-small,.status { display:none; } .topbar { padding-left:11px;padding-right:11px;gap:8px; } .tool { padding:8px 9px; } }
+    @media(max-width:720px) {
+      .tool { min-height:44px;padding:10px 12px;font-size:13px; }
+      .toolbar { gap:3px;overscroll-behavior-x:contain; }
+      #exportWrap { order:-1; }
+      .mobile-only { display:inline; }
+      .resize-handle { width:25px;height:25px;right:-10px;bottom:-10px; }
+      .node-link { width:34px;height:34px;right:5px;top:5px; }
+      .node-link svg { width:16px;height:16px; }
+      .icon-btn { width:40px;height:40px; }
+      .panel .field input,.panel .field select,.panel .field textarea { font-size:16px; }
+      .topbar { min-height:58px;padding:7px 8px; }
+      .brand-title { display:none; }
+      .brand-mark { width:31px;height:31px; }
+      .panel { display:none;position:absolute;right:9px;top:9px;bottom:9px;width:min(340px,calc(100% - 18px));border:1px solid #dce4f0;box-shadow:0 12px 36px #33415537;border-radius:14px;z-index:70;padding:17px; }
+      .panel.open { display:block; }
+      .panel-toggle { display:grid;position:absolute;right:15px;bottom:20px;width:43px;height:43px;place-items:center;border:1px solid #dce5f1;border-radius:13px;background:white;color:#3155b5;box-shadow:0 4px 15px #22304b25;z-index:7;font-size:19px; }
+      .close-panel { display:block; }
+      .hint { font-size:10px;max-width:calc(100% - 24px);top:9px;left:10px;padding:7px 9px; }
+      .canvas-controls { left:10px;bottom:14px; }
+      .credit-note { right:9px;bottom:76px;max-width:55%;font-size:8px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand" aria-label="Mindflow local board"><span class="brand-mark">M</span><span><span class="brand-title">mindflow</span><span class="brand-small">PRIVATE · LOCAL FIRST</span></span></div>
+    <div class="toolbar" role="toolbar" aria-label="Board actions">
+      <button class="tool primary" id="addNode" title="Add a rounded rectangle node"><span>＋</span> Node</button>
+      <div class="menu-wrap"><button class="tool" id="shapeMenuBtn" aria-haspopup="true" aria-expanded="false" title="Add a flowchart shape">◇ Shape ▾</button>
+        <div class="menu" id="shapeMenu"><div class="menu-heading">Add a shape</div>
+          <button data-add-shape="rect">▭ &nbsp; Rectangle / process</button>
+          <button data-add-shape="oval">◯ &nbsp; Oval / start-end</button>
+          <button data-add-shape="pill">▰ &nbsp; Pill badge</button>
+          <button data-add-shape="sticky">▣ &nbsp; Sticky note</button>
+          <button data-add-shape="diamond">◇ &nbsp; Decision diamond</button>
+          <button data-add-shape="data">▱ &nbsp; Input / output</button>
+          <button data-add-shape="document">▤ &nbsp; Document</button>
+        </div>
+      </div>
+      <span class="sep"></span>
+      <button class="tool active" id="selectTool" title="Select and drag nodes (V)">↖ Select</button>
+      <button class="tool" id="connectTool" title="Click two nodes to connect them (C)">↗ Connect</button>
+      <button class="tool" id="handTool" title="Pan the board (H). You can always drag empty space.">✋ Pan</button>
+      <span class="sep"></span>
+      <button class="tool" id="fitBtn" title="Fit all nodes in view (F)">⛶ Fit</button>
+      <div class="menu-wrap" id="exportWrap"><button class="tool" id="exportMenuBtn" aria-haspopup="true" aria-expanded="false" title="Download backups or images">⇩ Export ▾</button>
+        <div class="menu right" id="exportMenu"><div class="menu-heading">Download board</div>
+          <button id="exportJSON">JSON backup (.json)</button>
+          <button id="exportSVG">Vector image (.svg)</button>
+          <button id="exportPNG">Image (.png)</button>
+        </div>
+      </div>
+      <button class="tool" id="importBtn" title="Import a JSON board backup">⇧ Import</button>
+      <button class="tool danger" id="clearBtn" title="Remove every node and connector">⌫ Clear</button>
+      <input type="file" id="fileInput" accept=".json,application/json" hidden />
+    </div>
+    <div class="status" id="saveStatus"><span class="status-dot" id="saveDot"></span><span id="saveText">Saved locally</span></div>
+  </header>
+  <div class="work-area">
+    <main class="workspace tool-select" id="viewport" tabindex="0" aria-label="Mind map canvas">
+      <div class="dot-grid" id="grid"></div>
+      <svg id="wires" aria-label="Node connections"><defs>
+        <marker id="arrowEnd" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 1 1 L 11 6 L 1 11" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="arrowSelected" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 1 1 L 11 6 L 1 11" fill="none" stroke="#315dea" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+      </defs><g id="wireGroup"></g></svg>
+      <div id="world"></div>
+      <div class="hint" id="hint">Drag to pan · Scroll / pinch with 2 fingers to zoom · Double-click a title to edit</div>
+      <div class="canvas-controls" aria-label="Zoom controls">
+        <button class="icon-btn" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+        <span class="zoom-value" id="zoomValue">100%</span>
+        <button class="icon-btn" id="zoomIn" title="Zoom in" aria-label="Zoom in">＋</button>
+        <button class="icon-btn" id="zoomReset" title="Reset zoom" aria-label="Reset zoom">⟲</button>
+      </div>
+      <!-- Small attribution; not included in board exports. -->
+      <div class="credit-note">Vibe-coded with ChatGPT in Oct 2026, for individual use only</div>
+      <button class="panel-toggle" id="panelToggle" title="Show properties" aria-label="Show properties">⚙</button>
+      <div class="toast" role="status" aria-live="polite" id="toast"></div>
+    </main>
+    <aside class="panel" id="panel" aria-label="Properties">
+      <div class="panel-header"><h2 id="panelTitle">Properties</h2><button class="icon-btn close-panel" id="closePanel" aria-label="Close properties">✕</button></div>
+      <div id="emptyPanel" class="empty-panel"><div class="empty-icon">◇</div><strong>Make your ideas visible</strong><span class="subtle">Select a node or connector to edit it here.</span>
+        <div class="stats" id="stats"></div>
+        <div class="mini-help">Press <kbd>C</kbd> to connect two nodes.<br/>Press <kbd>Delete</kbd> to remove a selection.<br/>On mobile, pinch with two fingers to zoom; tap a node, then ⚙ to edit it.<br/>All data stays in your browser unless you export it.</div>
+      </div>
+      <div id="nodePanel" hidden>
+        <label class="field"><span class="field-label">TITLE</span><input id="nodeTitle" maxlength="160" placeholder="Node title" /></label>
+        <label class="field"><span class="field-label">NOTES</span><textarea id="nodeNotes" maxlength="4000" placeholder="Add details, ideas, or reminders..."></textarea></label>
+        <label class="field"><span class="field-label">SHAPE</span><select id="nodeShape">
+          <option value="round">Rounded rectangle</option><option value="rect">Rectangle / process</option><option value="oval">Oval</option><option value="pill">Pill</option><option value="sticky">Sticky note</option><option value="diamond">Decision diamond</option><option value="data">Input / output</option><option value="document">Document</option>
+        </select></label>
+        <div class="field"><div class="field-label">COLOUR</div><div class="swatches" id="nodeColors"></div></div>
+        <label class="field"><span class="field-label">HYPERLINK (OPTIONAL)</span><input id="nodeURL" type="url" inputmode="url" placeholder="https://example.com" /></label>
+        <div class="subtle" id="urlHint">An icon appears on the node when a link is provided. Only HTTP(S) links can be opened.</div>
+        <hr class="panel-sep" />
+        <button class="outline-btn" id="duplicateNode">⧉ Duplicate node</button><div style="height:9px"></div>
+        <button class="outline-btn danger" id="deleteNode">Delete node</button>
+      </div>
+      <div id="edgePanel" hidden>
+        <p class="subtle" id="edgeDescription"></p>
+        <label class="field"><span class="field-label">DIRECTION</span><select id="edgeDirection"><option value="none">Line (no arrow)</option><option value="forward">Single arrow →</option><option value="both">Two-way arrow ↔</option></select></label>
+        <label class="field"><span class="field-label">PATH</span><select id="edgePath"><option value="straight">Straight</option><option value="orthogonal">Orthogonal / elbow</option><option value="curved">Curved</option></select></label>
+        <button class="outline-btn danger" id="deleteEdge">Delete connector</button>
+      </div>
+    </aside>
+  </div>
+</div>
+<!-- A tap-friendly export sheet preserves a fresh user gesture for mobile Web Share. -->
+<div class="export-overlay" id="exportOverlay" role="presentation" hidden>
+  <section class="export-card" role="dialog" aria-modal="true" aria-labelledby="exportHeading">
+    <div class="export-heading"><h2 id="exportHeading">Export board</h2><button class="icon-btn" id="closeExport" aria-label="Close export dialog">✕</button></div>
+    <p id="exportMessage">Preparing file…</p>
+    <div class="export-filename" id="exportFilename"></div>
+    <div class="export-actions">
+      <button class="export-action primary" id="shareFile" hidden>Share / Save file</button>
+      <button class="export-action" id="downloadFile">Download</button>
+      <button class="export-action" id="previewFile">Open preview</button>
+      <button class="export-action" id="copyExport" hidden>Copy JSON</button>
+    </div>
+    <p class="export-note" id="exportNote">On phones, Share / Save may be more reliable than Download. Use your device’s Files or Save action. The preview offers an alternative for images.</p>
+    <textarea class="export-source" id="exportSource" readonly hidden aria-label="JSON backup text to copy"></textarea>
+  </section>
+</div>
+<script>
+(() => {
+  'use strict';
+  // ===== Application data model (no framework or server) =====
+  const STORAGE_KEY = 'mindflow_local_board_v1';
+  const SHAPES = new Set(['round','rect','oval','pill','sticky','diamond','data','document']);
+  const DIRECTIONS = new Set(['none','forward','both']);
+  const PATHS = new Set(['straight','orthogonal','curved']);
+  const COLORS = [
+    {id:'blue',fill:'#e8f1ff',outline:'#a8c7f8'},
+    {id:'violet',fill:'#f0e9ff',outline:'#cabbf9'},
+    {id:'mint',fill:'#def8ee',outline:'#a4e6c8'},
+    {id:'peach',fill:'#fff0e5',outline:'#f3ceb0'},
+    {id:'yellow',fill:'#fff6d9',outline:'#f0dd98'},
+    {id:'rose',fill:'#ffe9ef',outline:'#f5b7ca'},
+    {id:'slate',fill:'#edf1f5',outline:'#c9d3df'},
+    {id:'white',fill:'#ffffff',outline:'#d2dbe5'}
+  ];
+  const $ = id => document.getElementById(id);
+  const viewport = $('viewport'), world = $('world'), wireGroup = $('wireGroup');
+  const clean = () => ({version:1,nodes:[],edges:[],view:{x:0,y:0,scale:1}});
+  let board = clean();
+  let selected = null;  // {kind:'node'|'edge', id:string} or null
+  let tool = 'select';  // select, connect, hand
+  let connectFrom = null;
+  let gesture = null;
+  const touches = new Map();  // Active touch pointers in viewport coordinates.
+  let pinch = null, suppressClickUntil = 0;
+  let exportReady = null, exportURL = null, exportGeneration = 0;
+  let saveTimer = null, toastTimer = null, saveFailed = false;
+  const randomId = () => (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID() : `id_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const finite = (value,fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const clamp = (value,min,max) => Math.min(max,Math.max(min,value));
+  const pick = (value,set,fallback) => set.has(value) ? value : fallback;
+  const color = id => COLORS.find(c => c.id === id) || COLORS[0];
+  const el = (tag,className,text) => {const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;};
+  const validURL = raw => {try {const u = new URL(String(raw).trim());return /^https?:$/.test(u.protocol) ? u.href : null;} catch {return null;}};
+  function toast(message) {const t=$('toast');t.textContent=message;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2700);}
+  function saveNow() {
+    clearTimeout(saveTimer);saveTimer=null;
+    try { localStorage.setItem(STORAGE_KEY,JSON.stringify(board));saveFailed=false;$('saveDot').classList.remove('error');$('saveText').textContent='Saved locally'; }
+    catch(e) {if(!saveFailed)toast('Local storage is unavailable or full. Export a JSON backup.');saveFailed=true;$('saveDot').classList.add('error');$('saveText').textContent='Not saved';}
+  }
+  function scheduleSave() {
+    $('saveText').textContent='Saving…';clearTimeout(saveTimer);saveTimer=setTimeout(saveNow,180);
+  }
+  function normalize(raw) {
+    if(!raw || typeof raw!=='object'||Array.isArray(raw)||!Array.isArray(raw.nodes)||!Array.isArray(raw.edges))throw Error('Not a valid Mindflow board JSON file.');
+    if(raw.version !== 1)throw Error('Unsupported backup version (expected version 1).');
+    if(raw.nodes.length>1000||raw.edges.length>3000)throw Error('Board is too large to import safely.');
+    const ids=new Set();
+    const nodes=raw.nodes.filter(n=>n&&typeof n==='object'&&!Array.isArray(n)).map(n=>{
+      const id=typeof n.id==='string'&&n.id.length<200?n.id:randomId();
+      if(ids.has(id))throw Error('Duplicate node IDs in the backup.');ids.add(id);
+      const shape=pick(n.shape,SHAPES,'round');
+      return {id,x:clamp(finite(n.x,0),-100000,100000),y:clamp(finite(n.y,0),-100000,100000),
+        w:clamp(finite(n.w,200),shape==='diamond'?150:90,900),h:clamp(finite(n.h,110),shape==='diamond'?120:60,700),
+        title:String(n.title??'Untitled').slice(0,160),notes:String(n.notes??'').slice(0,4000),url:String(n.url??'').slice(0,2048),
+        shape,color:COLORS.some(c=>c.id===n.color)?n.color:'blue'};
+    });
+    const edgeIds=new Set();
+    const edges=raw.edges.filter(e=>e&&typeof e==='object'&&!Array.isArray(e)).map(e=>({
+      id:typeof e.id==='string'&&e.id.length<200?e.id:randomId(),from:e.from,to:e.to,
+      direction:pick(e.direction,DIRECTIONS,'forward'),path:pick(e.path,PATHS,'curved')
+    })).filter(e=>{
+      if(!ids.has(e.from)||!ids.has(e.to)||e.from===e.to||edgeIds.has(e.id))return false;
+      edgeIds.add(e.id);return true;
+    });
+    const v=raw.view||{};
+    return {version:1,nodes,edges,view:{x:clamp(finite(v.x,0),-100000,100000),y:clamp(finite(v.y,0),-100000,100000),scale:clamp(finite(v.scale,1),.2,3)}};
+  }
+  function seed() {
+    const demo=clean();
+    demo.nodes=[
+      {id:randomId(),x:65,y:100,w:210,h:110,title:'Your big idea',notes:'Start with a central thought',url:'',shape:'round',color:'blue'},
+      {id:randomId(),x:390,y:25,w:200,h:105,title:'Explore possibilities',notes:'Double-click to rename',url:'',shape:'sticky',color:'yellow'},
+      {id:randomId(),x:390,y:210,w:200,h:106,title:'Next steps',notes:'Connect, resize, or add notes',url:'',shape:'round',color:'mint'}
+    ];
+    demo.edges=[{id:randomId(),from:demo.nodes[0].id,to:demo.nodes[1].id,direction:'forward',path:'curved'},
+      {id:randomId(),from:demo.nodes[0].id,to:demo.nodes[2].id,direction:'forward',path:'orthogonal'}];
+    return demo;
+  }
+  // ===== Viewport geometry; all node positions remain in world coordinates =====
+  function viewPoint(event) {const r=viewport.getBoundingClientRect();return {x:event.clientX-r.left,y:event.clientY-r.top};}
+  function worldPoint(s) {return {x:(s.x-board.view.x)/board.view.scale,y:(s.y-board.view.y)/board.view.scale};}
+  function applyView() {
+    const {x,y,scale}=board.view;
+    world.style.transform=`translate(${x}px, ${y}px) scale(${scale})`;
+    wireGroup.setAttribute('transform',`translate(${x} ${y}) scale(${scale})`);
+    const gridSize=24*scale;
+    $('grid').style.backgroundSize=`${gridSize}px ${gridSize}px`;
+    $('grid').style.backgroundPosition=`${x}px ${y}px`;
+    $('zoomValue').textContent=`${Math.round(scale*100)}%`;
+  }
+  function zoomAt(factor,point) {
+    const v=board.view;const old=v.scale;const next=clamp(old*factor,.2,3);
+    const wx=(point.x-v.x)/old,wy=(point.y-v.y)/old;
+    v.scale=next;v.x=point.x-wx*next;v.y=point.y-wy*next;
+    applyView();scheduleSave();
+  }
+  function fitBoard() {
+    if(!board.nodes.length){board.view={x:viewport.clientWidth/2,y:viewport.clientHeight/2,scale:1};}
+    else {
+      const minX=Math.min(...board.nodes.map(n=>n.x)),minY=Math.min(...board.nodes.map(n=>n.y));
+      const maxX=Math.max(...board.nodes.map(n=>n.x+n.w)),maxY=Math.max(...board.nodes.map(n=>n.y+n.h));
+      const s=clamp(Math.min((viewport.clientWidth-90)/Math.max(1,maxX-minX),(viewport.clientHeight-100)/Math.max(1,maxY-minY)),.2,1.6);
+      board.view={scale:s,x:(viewport.clientWidth-(maxX+minX)*s)/2,y:(viewport.clientHeight-(maxY+minY)*s)/2};
+    }
+    applyView();scheduleSave();
+  }
+  function findNode(id){return board.nodes.find(n=>n.id===id);}
+  function findEdge(id){return board.edges.find(e=>e.id===id);}
+  // Pick connection ports on the facing sides of each rectangular node bound.
+  function edgeGeometry(edge) {
+    const a=findNode(edge.from),b=findNode(edge.to);if(!a||!b)return null;
+    const ax=a.x+a.w/2,ay=a.y+a.h/2,bx=b.x+b.w/2,by=b.y+b.h/2;
+    const horizontal=Math.abs(bx-ax)>=Math.abs(by-ay);
+    let p,q;
+    if(horizontal){const right=bx>=ax;p={x:ax+(right?a.w/2:-a.w/2),y:ay};q={x:bx+(right?-b.w/2:b.w/2),y:by};}
+    else {const below=by>=ay;p={x:ax,y:ay+(below?a.h/2:-a.h/2)};q={x:bx,y:by+(below?-b.h/2:b.h/2)};}
+    return {p,q,horizontal};
+  }
+  function edgeD(edge) {
+    const g=edgeGeometry(edge);if(!g)return '';
+    const {p,q,horizontal}=g;
+    if(edge.path==='straight')return `M ${p.x} ${p.y} L ${q.x} ${q.y}`;
+    if(edge.path==='orthogonal'){
+      return horizontal?`M ${p.x} ${p.y} H ${(p.x+q.x)/2} V ${q.y} H ${q.x}`:
+        `M ${p.x} ${p.y} V ${(p.y+q.y)/2} H ${q.x} V ${q.y}`;
+    }
+    const span=horizontal?Math.abs(q.x-p.x):Math.abs(q.y-p.y);const bow=clamp(span*.55,35,155);
+    if(horizontal){const dir=q.x>=p.x?1:-1;return `M ${p.x} ${p.y} C ${p.x+dir*bow} ${p.y}, ${q.x-dir*bow} ${q.y}, ${q.x} ${q.y}`;}
+    const dir=q.y>=p.y?1:-1;
+    return `M ${p.x} ${p.y} C ${p.x} ${p.y+dir*bow}, ${q.x} ${q.y-dir*bow}, ${q.x} ${q.y}`;
+  }
+  const ns='http://www.w3.org/2000/svg';
+  function svgEl(tag,attrs={}) {const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,String(v));return e;}
+  function renderEdges() {
+    wireGroup.replaceChildren();
+    board.edges.forEach(edge=>{
+      const d=edgeD(edge);if(!d)return;
+      const chosen=selected?.kind==='edge'&&selected.id===edge.id;
+      const visible=svgEl('path',{d,class:`wire${chosen?' selected':''}`});
+      if(edge.direction!=='none')visible.setAttribute('marker-end',chosen?'url(#arrowSelected)':'url(#arrowEnd)');
+      if(edge.direction==='both')visible.setAttribute('marker-start',chosen?'url(#arrowSelected)':'url(#arrowEnd)');
+      const hit=svgEl('path',{d,class:'wire-hit','data-edge-id':edge.id});
+      hit.addEventListener('pointerdown',e=>{if(tool==='hand')return;e.stopPropagation();select({kind:'edge',id:edge.id});});
+      wireGroup.append(visible,hit);
+    });
+  }
+  function makeNodeDOM(node) {
+    const element=el('div',`node shape-${node.shape}`);element.dataset.id=node.id;
+    const surface=el('div','node-surface');const content=el('div','node-content');
+    const title=el('div','node-title',node.title||'Untitled');title.title='Double-click to edit title';
+    const notes=el('div','node-notes',node.notes);
+    content.append(title,notes);element.append(surface,content);
+    const link=el('button','node-link');link.type='button';link.title='Open node hyperlink in a new tab';
+    link.setAttribute('aria-label',`Open hyperlink for ${node.title||'node'}`);
+    link.innerHTML='<svg viewBox="0 0 24 24"><path d="M10 14 21 3M13 3h8v8M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6"/></svg>';
+    link.hidden=!node.url.trim();link.classList.toggle('invalid',Boolean(node.url.trim()&&!validURL(node.url)));
+    link.addEventListener('pointerdown',e=>e.stopPropagation());
+    link.addEventListener('click',e=>{e.stopPropagation();const url=validURL(node.url);if(url)window.open(url,'_blank','noopener,noreferrer');else toast('Please enter a valid https:// or http:// URL.');});
+    const resize=el('div','resize-handle');resize.dataset.resize='true';resize.title='Drag to resize';
+    element.append(link,resize);
+    title.addEventListener('dblclick',e=>{
+      e.stopPropagation();if(tool==='hand')return;
+      select({kind:'node',id:node.id});title.contentEditable='true';title.focus();
+      const range=document.createRange();range.selectNodeContents(title);const s=window.getSelection();s.removeAllRanges();s.addRange(range);
+    });
+    title.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){e.preventDefault();title.blur();}
+      if(e.key==='Escape'){e.preventDefault();title.textContent=node.title||'Untitled';title.blur();}
+    });
+    title.addEventListener('blur',()=>{if(title.contentEditable!=='true')return;title.contentEditable='false';const txt=title.textContent.trim().slice(0,160);if(txt!==node.title){node.title=txt;renderNodes();refreshPanel();scheduleSave();}});
+    element.addEventListener('pointerdown',e=>onNodeDown(e,node,element));
+    return element;
+  }
+  function placeNode(element,node) {
+    const c=color(node.color);element.style.left=`${node.x}px`;element.style.top=`${node.y}px`;
+    element.style.width=`${node.w}px`;element.style.height=`${node.h}px`;
+    element.style.setProperty('--fill',c.fill);element.style.setProperty('--outline',c.outline);
+    element.className=`node shape-${node.shape}${selected?.kind==='node'&&selected.id===node.id?' selected':''}${connectFrom===node.id?' connect-source':''}`;
+  }
+  function renderNodes() {world.replaceChildren(...board.nodes.map(n=>{const e=makeNodeDOM(n);placeNode(e,n);return e;}));renderEdges();updateStats();}
+  function renderNodePosition(id) {const n=findNode(id);const e=[...world.children].find(x=>x.dataset.id===id);if(n&&e)placeNode(e,n);renderEdges();}
+  function updateStats() {$('stats').textContent=`${board.nodes.length} nodes · ${board.edges.length} connections\nStored only in this browser. Export JSON to back up or transfer.`;$('stats').style.whiteSpace='pre-line';}
+  // ===== Selection and properties inspector =====
+  function select(value) {
+    selected=value;
+    for (const element of world.children) {
+      element.classList.toggle('selected',selected?.kind==='node' && selected.id===element.dataset.id);
+      element.classList.toggle('connect-source',connectFrom===element.dataset.id);
+    }
+    renderEdges();refreshPanel();
+  }
+  function refreshPanel() {
+    const n=selected?.kind==='node'?findNode(selected.id):null;
+    const e=selected?.kind==='edge'?findEdge(selected.id):null;
+    $('emptyPanel').hidden=!!(n||e);$('nodePanel').hidden=!n;$('edgePanel').hidden=!e;
+    $('panelTitle').textContent=n?'Node properties':e?'Connector properties':'Properties';
+    if(n){
+      $('nodeTitle').value=n.title;$('nodeNotes').value=n.notes;$('nodeShape').value=n.shape;$('nodeURL').value=n.url;
+      $('urlHint').textContent=n.url.trim()&&!validURL(n.url)?'This is not a valid HTTP(S) URL. The link icon cannot open it.':'An icon appears on the node when a link is provided. Only HTTP(S) links can be opened.';
+      $('urlHint').style.color=n.url.trim()&&!validURL(n.url)?'#c24142':'';
+      renderColors(n);
+    }
+    if(e){$('edgeDirection').value=e.direction;$('edgePath').value=e.path;
+      $('edgeDescription').textContent=`${findNode(e.from)?.title||'Node'} → ${findNode(e.to)?.title||'Node'}`;}
+    updateStats();
+  }
+  function renderColors(n) {
+    const wrap=$('nodeColors');wrap.replaceChildren();
+    COLORS.forEach(c=>{const b=el('button',`swatch${n.color===c.id?' on':''}`);b.type='button';b.title=c.id;
+      b.style.background=c.fill;b.setAttribute('aria-label',`Change colour to ${c.id}`);
+      b.addEventListener('click',()=>{n.color=c.id;renderNodePosition(n.id);renderColors(n);scheduleSave();});wrap.appendChild(b);});
+  }
+  function editNode(field,value) {
+    const n=selected?.kind==='node'?findNode(selected.id):null;if(!n)return;
+    n[field]=value;
+    // Redraw node markup but do not touch active property fields (preserves cursor position).
+    renderNodes();scheduleSave();
+    if(field==='url'){$('urlHint').textContent=value.trim()&&!validURL(value)?'This is not a valid HTTP(S) URL. The link icon cannot open it.':'An icon appears on the node when a link is provided. Only HTTP(S) links can be opened.';}
+  }
+  function editEdge(field,value) {const e=selected?.kind==='edge'?findEdge(selected.id):null;if(!e)return;e[field]=value;renderEdges();scheduleSave();}
+  // ===== Pointer gestures: drag nodes, resize nodes, pan and two-finger pinch =====
+  const touchDistance = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
+  const touchCenter = (a,b) => ({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+  function beginPinch() {
+    if(touches.size<2)return;
+    const [a,b]=[...touches.values()].slice(0,2);
+    // Cancel an in-progress node drag/resize when a second finger joins.
+    if(gesture && (gesture.type==='move'||gesture.type==='resize')) {
+      const n=findNode(gesture.id);
+      if(n){Object.assign(n,gesture.orig);renderNodePosition(n.id);}
+    }
+    gesture=null;
+    viewport.classList.remove('dragging');
+    const midpoint=touchCenter(a,b);
+    pinch={startDistance:Math.max(1,touchDistance(a,b)),startScale:board.view.scale,
+      anchor:worldPoint(midpoint)};
+  }
+  function updatePinch() {
+    if(!pinch||touches.size<2)return;
+    const [a,b]=[...touches.values()].slice(0,2);
+    const midpoint=touchCenter(a,b);
+    const scale=clamp(pinch.startScale*touchDistance(a,b)/pinch.startDistance,.2,3);
+    board.view.scale=scale;
+    board.view.x=midpoint.x-pinch.anchor.x*scale;
+    board.view.y=midpoint.y-pinch.anchor.y*scale;
+    applyView();scheduleSave();
+  }
+  // Capture-phase tracking works even if the first finger touches a node.
+  viewport.addEventListener('pointerdown',event=>{
+    if(event.pointerType!=='touch' || event.target.closest('.canvas-controls,.panel-toggle'))return;
+    touches.set(event.pointerId,viewPoint(event));
+    if(touches.size>=2){
+      if(!pinch)beginPinch();
+      event.preventDefault();event.stopPropagation();
+      try{viewport.setPointerCapture(event.pointerId);}catch{}
+    }
+  },true);
+  viewport.addEventListener('pointermove',event=>{
+    if(!touches.has(event.pointerId))return;
+    touches.set(event.pointerId,viewPoint(event));
+    if(pinch){updatePinch();event.preventDefault();event.stopPropagation();}
+  },true);
+  function releaseTouch(event) {
+    if(!touches.has(event.pointerId))return;
+    touches.delete(event.pointerId);
+    if(pinch){
+      pinch=null;suppressClickUntil=Date.now()+450;
+      if(touches.size===1){
+        // Allow an uninterrupted one-finger pan after the other finger lifts.
+        const point=[...touches.values()][0];
+        gesture={type:'pan',start:point,orig:{x:board.view.x,y:board.view.y},moved:false};
+      } else {gesture=null;viewport.classList.remove('dragging');}
+      scheduleSave();
+    }
+  }
+  viewport.addEventListener('pointerup',releaseTouch,true);
+  viewport.addEventListener('pointercancel',releaseTouch,true);
+  viewport.addEventListener('click',event=>{
+    if(Date.now()<suppressClickUntil){event.preventDefault();event.stopImmediatePropagation();}
+  },true);
+  function onNodeDown(event,node,element) {
+    if(event.button!==0 || pinch || (event.pointerType==='touch'&&touches.size>1) || event.target.closest('.node-link') || event.target.isContentEditable)return;
+    if(tool==='hand')return; // allow the pointer event to bubble and pan through nodes
+    event.stopPropagation();
+    if(tool==='connect') {
+      if(!connectFrom){connectFrom=node.id;select({kind:'node',id:node.id});toast('Now click the destination node.');}
+      else if(connectFrom===node.id){connectFrom=null;renderNodes();toast('Connection cancelled.');}
+      else {board.edges.push({id:randomId(),from:connectFrom,to:node.id,direction:'forward',path:'curved'});connectFrom=null;select({kind:'edge',id:board.edges.at(-1).id});scheduleSave();toast('Connector added. Change its style in Properties.');}
+      return;
+    }
+    select({kind:'node',id:node.id});
+    const resize=Boolean(event.target.closest('[data-resize]'));
+    gesture={type:resize?'resize':'move',id:node.id,start:viewPoint(event),orig:{x:node.x,y:node.y,w:node.w,h:node.h},moved:false};
+    event.target.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+  viewport.addEventListener('pointerdown',event=>{
+    if(event.button!==0||gesture||pinch||(event.pointerType==='touch'&&touches.size>1))return;
+    if(event.target.closest('.node-link')||event.target.closest('.canvas-controls')||event.target.closest('.panel-toggle'))return;
+    if(event.target.closest('.node') && tool!=='hand')return;
+    if(event.target.closest('.wire-hit') && tool!=='hand')return;
+    const p=viewPoint(event);
+    gesture={type:'pan',start:p,orig:{x:board.view.x,y:board.view.y},moved:false};
+    viewport.setPointerCapture(event.pointerId);viewport.classList.add('dragging');
+    if(!event.target.closest('.node')&&tool!=='connect')select(null);
+    event.preventDefault();
+  });
+  viewport.addEventListener('pointermove',event=>{
+    if(pinch||!gesture)return;
+    const p=viewPoint(event),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;
+    if(Math.abs(dx)+Math.abs(dy)>3)gesture.moved=true;
+    if(gesture.type==='pan'){
+      board.view.x=gesture.orig.x+dx;board.view.y=gesture.orig.y+dy;applyView();
+    } else {
+      const n=findNode(gesture.id);if(!n)return;
+      if(gesture.type==='move'){n.x=gesture.orig.x+dx/board.view.scale;n.y=gesture.orig.y+dy/board.view.scale;}
+      else {n.w=clamp(gesture.orig.w+dx/board.view.scale,n.shape==='diamond'?150:90,900);
+        n.h=clamp(gesture.orig.h+dy/board.view.scale,n.shape==='diamond'?120:60,700);}
+      renderNodePosition(n.id);
+    }
+  });
+  function endGesture(){if(!gesture)return;if(gesture.moved)scheduleSave();gesture=null;viewport.classList.remove('dragging');}
+  viewport.addEventListener('pointerup',event=>{if(!pinch&&touches.size===0)endGesture();});
+  viewport.addEventListener('pointercancel',event=>{if(!pinch&&touches.size===0)endGesture();});
+  viewport.addEventListener('wheel',event=>{event.preventDefault();zoomAt(Math.exp(-event.deltaY*.0013),viewPoint(event));},{passive:false});
+  // Clicking empty space in connection mode cancels pending source.
+  viewport.addEventListener('click',event=>{
+    if(tool==='connect'&&!event.target.closest('.node')&&!event.target.closest('.wire-hit')&&connectFrom){connectFrom=null;renderNodes();toast('Connection cancelled.');}
+  });
+  // ===== Editing and CRUD =====
+  function setTool(value) {
+    tool=value;connectFrom=null;
+    for(const key of ['select','connect','hand'])$(key+'Tool').classList.toggle('active',key===tool);
+    viewport.classList.remove('tool-select','tool-connect','tool-hand');viewport.classList.add('tool-'+tool);
+    $('hint').textContent=tool==='connect'?'Click a source node, then a destination node · Esc cancels':
+      tool==='hand'?'Drag to pan · Scroll or pinch to zoom':'Drag empty space to pan · Scroll or pinch to zoom · Double-click a title to edit';
+    renderNodes();
+  }
+  function addNode(shape='round',at) {
+    const dims=shape==='diamond'?{w:200,h:170}:shape==='pill'?{w:185,h:75}:shape==='oval'?{w:205,h:115}:
+      shape==='sticky'?{w:175,h:165}:{w:205,h:112};
+    const center=at||worldPoint({x:viewport.clientWidth/2,y:viewport.clientHeight/2});
+    const n={id:randomId(),x:center.x-dims.w/2,y:center.y-dims.h/2,w:dims.w,h:dims.h,
+      title:shape==='diamond'?'Decision?':'New idea',notes:'',url:'',shape,color:shape==='sticky'?'yellow':'blue'};
+    board.nodes.push(n);setTool('select');select({kind:'node',id:n.id});scheduleSave();
+    if(window.matchMedia('(max-width: 720px)').matches)$('panel').classList.add('open');
+  }
+  function deleteSelected() {
+    if(!selected)return;
+    if(selected.kind==='node'){board.nodes=board.nodes.filter(n=>n.id!==selected.id);board.edges=board.edges.filter(e=>e.from!==selected.id&&e.to!==selected.id);}
+    else board.edges=board.edges.filter(e=>e.id!==selected.id);
+    selected=null;renderNodes();refreshPanel();scheduleSave();
+  }
+  $('nodeTitle').addEventListener('input',e=>editNode('title',e.target.value.slice(0,160)));
+  $('nodeNotes').addEventListener('input',e=>editNode('notes',e.target.value.slice(0,4000)));
+  $('nodeURL').addEventListener('input',e=>editNode('url',e.target.value.slice(0,2048)));
+  $('nodeShape').addEventListener('change',e=>{const n=findNode(selected?.id);if(!n)return;n.shape=pick(e.target.value,SHAPES,'round');
+    if(n.shape==='diamond'){n.w=Math.max(n.w,150);n.h=Math.max(n.h,120);}renderNodes();scheduleSave();});
+  $('edgeDirection').addEventListener('change',e=>editEdge('direction',pick(e.target.value,DIRECTIONS,'forward')));
+  $('edgePath').addEventListener('change',e=>editEdge('path',pick(e.target.value,PATHS,'curved')));
+  $('deleteNode').addEventListener('click',deleteSelected);$('deleteEdge').addEventListener('click',deleteSelected);
+  $('duplicateNode').addEventListener('click',()=>{const n=findNode(selected?.id);if(!n)return;const copy={...n,id:randomId(),x:n.x+35,y:n.y+35};board.nodes.push(copy);select({kind:'node',id:copy.id});scheduleSave();});
+  $('addNode').addEventListener('click',()=>addNode());
+  for(const b of document.querySelectorAll('[data-add-shape]'))b.addEventListener('click',()=>{addNode(b.dataset.addShape);closeMenus();});
+  for(const t of ['select','connect','hand'])$(t+'Tool').addEventListener('click',()=>setTool(t));
+  $('clearBtn').addEventListener('click',()=>{if(!window.confirm('Clear the entire board? This deletes all nodes and connectors from local storage. Export a backup first if needed.'))return;
+    board=clean();selected=null;connectFrom=null;setTool('select');fitBoard();refreshPanel();saveNow();toast('Board cleared.');});
+  $('fitBtn').addEventListener('click',fitBoard);
+  $('zoomIn').addEventListener('click',()=>zoomAt(1.2,{x:viewport.clientWidth/2,y:viewport.clientHeight/2}));
+  $('zoomOut').addEventListener('click',()=>zoomAt(1/1.2,{x:viewport.clientWidth/2,y:viewport.clientHeight/2}));
+  $('zoomReset').addEventListener('click',()=>zoomAt(1/board.view.scale,{x:viewport.clientWidth/2,y:viewport.clientHeight/2}));
+  $('panelToggle').addEventListener('click',()=>$('panel').classList.toggle('open'));
+  $('closePanel').addEventListener('click',()=>$('panel').classList.remove('open'));
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&!$('exportOverlay').hidden){closeExport();return;}
+    const typing=e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);
+    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveNow();toast('Saved in this browser. Export JSON for a portable backup.');return;}
+    if(typing)return;
+    if(e.key==='Escape'){connectFrom=null;setTool('select');select(null);return;}
+    if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();deleteSelected();return;}
+    if(e.key.toLowerCase()==='v')setTool('select');
+    if(e.key.toLowerCase()==='c')setTool('connect');
+    if(e.key.toLowerCase()==='h')setTool('hand');
+    if(e.key.toLowerCase()==='f')fitBoard();
+    if(e.key==='+'||e.key==='=')zoomAt(1.2,{x:viewport.clientWidth/2,y:viewport.clientHeight/2});
+    if(e.key==='-')zoomAt(1/1.2,{x:viewport.clientWidth/2,y:viewport.clientHeight/2});
+  });
+  // ===== Export: prepare in memory, then require a user tap to save/share =====
+  // Mobile browsers often block synthetic <a download> clicks, especially from file://
+  // and embedded webviews. Native Web Share (Files) + download + preview are offered.
+  const filename = ext => `mindflow-${new Date().toISOString().slice(0,10)}.${ext}`;
+  function setExportReady(blob,name,kind) {
+    if(exportURL)URL.revokeObjectURL(exportURL);
+    exportURL=URL.createObjectURL(blob);
+    exportReady={file:new File([blob],name,{type:blob.type}),blob,name,kind};
+    $('exportFilename').textContent=name;
+    $('exportMessage').textContent='Your '+kind.toUpperCase()+' file is ready. Choose how to save it.';
+    $('downloadFile').disabled=false;$('previewFile').disabled=false;
+    const canShare=typeof navigator.share==='function' && typeof navigator.canShare==='function' &&
+      (()=>{try{return navigator.canShare({files:[exportReady.file]});}catch{return false;}})();
+    $('shareFile').hidden=!canShare;
+    $('copyExport').hidden=kind!=='json';
+    $('exportNote').textContent=canShare
+      ? 'On mobile, tap Share / Save file and choose a suitable app or Save to Files. Download and preview are alternatives.'
+      : 'If Download does not work in your browser, try Open preview. Some in-app browsers restrict saving local HTML files; opening this app directly in Chrome or Safari can help.';
+  }
+  function showExport(kind){
+    closeMenus();
+    $('exportOverlay').hidden=false;
+    $('exportHeading').textContent='Export '+kind.toUpperCase();
+    $('exportFilename').textContent='Preparing…';
+    $('exportMessage').textContent='Preparing your file…';
+    $('shareFile').hidden=true;$('copyExport').hidden=true;
+    $('downloadFile').disabled=true;$('previewFile').disabled=true;
+    $('exportSource').hidden=true;
+    exportReady=null;
+  }
+  function closeExport(){
+    exportGeneration++;
+    $('exportOverlay').hidden=true;
+    $('exportSource').hidden=true;
+    // Keep object URLs alive until the user closes the dialog, not just 2 seconds.
+    if(exportURL){URL.revokeObjectURL(exportURL);exportURL=null;}
+    exportReady=null;
+  }
+  function requestDownload(){
+    if(!exportReady)return;
+    // This is intentionally triggered by a real tap, not async image creation.
+    const a=document.createElement('a');
+    a.href=exportURL;a.download=exportReady.name;
+    a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+    toast('Save requested. Check Downloads; if blocked, try Share / Save or preview.');
+  }
+  async function requestShare(){
+    if(!exportReady)return;
+    try {await navigator.share({files:[exportReady.file],title:exportReady.name});
+      toast('Share completed. Check the destination app for the file.');}
+    catch(e){if(e?.name!=='AbortError')toast('Share unavailable. Try Download or Open preview.');}
+  }
+  function openExportPreview(){
+    if(!exportURL)return;
+    // Open directly from a user tap so popup blockers are less likely to interfere.
+    const a=document.createElement('a');a.href=exportURL;a.target='_blank';a.rel='noopener noreferrer';
+    document.body.appendChild(a);a.click();a.remove();
+    toast('Preview requested. If nothing opens, use a full browser.');
+  }
+  async function copyExportJSON(){
+    if(exportReady?.kind!=='json')return;
+    const source=await exportReady.blob.text();
+    try{if(!navigator.clipboard?.writeText)throw Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(source);toast('JSON copied to clipboard.');}
+    catch{
+      const field=$('exportSource');field.hidden=false;field.value=source;field.focus();field.select();
+      // Browsers without clipboard permission can still copy selected text manually.
+      toast('Select and copy the JSON text shown below.');
+    }
+  }
+  async function prepareExport(kind) {
+    const generation=++exportGeneration;
+    showExport(kind);
+    try {
+      if(kind==='json'){
+        saveNow();setExportReady(new Blob([JSON.stringify(board,null,2)],{type:'application/json'}),filename('json'),kind);
+      } else if(kind==='svg'){
+        setExportReady(new Blob([exportSVGString()],{type:'image/svg+xml;charset=utf-8'}),filename('svg'),kind);
+      } else if(kind==='png'){
+        // PNG rasterization is async. Prepare BEFORE Share/Download button is tapped.
+        const blob=await createPNGBlob();
+        if($('exportOverlay').hidden||generation!==exportGeneration)return;
+        setExportReady(blob,filename('png'),kind);
+      }
+    }catch(e){if(generation!==exportGeneration)return;$('exportFilename').textContent='Export failed';$('exportMessage').textContent=e.message||'Could not create file.';toast('Export failed.');}
+  }
+  function xmlEscape(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));}
+  // Break text approximately to fit shape using portable SVG text elements.
+  function wrapText(value,limit,maxLines) {
+    const all=[];for(const line of String(value).split(/\r?\n/)){
+      const words=line.split(/\s+/);let current='';
+      for(const word of words){if(!word)continue;
+        if((current+' '+word).trim().length<=limit){current=(current+' '+word).trim();continue;}
+        if(current)all.push(current);current='';
+        for(let i=0;i<word.length;i+=limit){const part=word.slice(i,i+limit);if(part.length===limit)all.push(part);else current=part;}
+      }
+      all.push(current);
+    }
+    return all.slice(0,maxLines);
+  }
+  function svgShape(n) {
+    const {x,y,w,h}=n,c=color(n.color);
+    const rect=(rx)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/>`;
+    if(n.shape==='round')return rect(12);
+    if(n.shape==='rect')return rect(4);
+    if(n.shape==='sticky')return `<path d="M ${x} ${y} H ${x+w*.86} L ${x+w} ${y+h*.14} V ${y+h} H ${x} Z" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/><path d="M ${x+w*.86} ${y} V ${y+h*.14} H ${x+w}" fill="none" stroke="${c.outline}"/>`;
+    if(n.shape==='oval')return `<ellipse cx="${x+w/2}" cy="${y+h/2}" rx="${w/2}" ry="${h/2}" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/>`;
+    if(n.shape==='pill')return rect(h/2);
+    if(n.shape==='diamond')return `<polygon points="${x+w/2},${y} ${x+w},${y+h/2} ${x+w/2},${y+h} ${x},${y+h/2}" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/>`;
+    if(n.shape==='data')return `<polygon points="${x+w*.13},${y} ${x+w},${y} ${x+w*.87},${y+h} ${x},${y+h}" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/>`;
+    return `<path d="M ${x+5} ${y} H ${x+w-5} Q ${x+w} ${y} ${x+w} ${y+5} V ${y+h-17} Q ${x+w*.7} ${y+h+5} ${x+w*.45} ${y+h-9} Q ${x+w*.2} ${y+h-18} ${x} ${y+h} V ${y+5} Q ${x} ${y} ${x+5} ${y} Z" fill="${c.fill}" stroke="${c.outline}" stroke-width="1.6"/>`;
+  }
+  function svgText(n) {
+    const narrow=['diamond','oval'].includes(n.shape)?0.52:n.shape==='data'?0.72:0.84;
+    const maxChars=Math.max(6,Math.floor(n.w*narrow/8.5));
+    const titleLines=wrapText(n.title||'Untitled',maxChars,3);
+    const notesLines=wrapText(n.notes,Math.max(6,Math.floor(n.w*narrow/7)),3).filter(Boolean);
+    const lineHeight=19,notesHeight=15;
+    const total=titleLines.length*lineHeight+(notesLines.length?5+notesLines.length*notesHeight:0);
+    let cursor=n.y+(n.h-total)/2+15;
+    let output='';
+    for(const line of titleLines){output+=`<text x="${n.x+n.w/2}" y="${cursor}" text-anchor="middle" font-size="15" font-weight="700" fill="#26364a">${xmlEscape(line)}</text>`;cursor+=lineHeight;}
+    if(notesLines.length){cursor+=3;for(const line of notesLines){output+=`<text x="${n.x+n.w/2}" y="${cursor}" text-anchor="middle" font-size="11.5" fill="#637184">${xmlEscape(line)}</text>`;cursor+=notesHeight;}}
+    return output;
+  }
+  function exportSVGString() {
+    if(!board.nodes.length)throw Error('Add at least one node before exporting an image.');
+    const minX=Math.min(...board.nodes.map(n=>n.x))-38,minY=Math.min(...board.nodes.map(n=>n.y))-38;
+    const maxX=Math.max(...board.nodes.map(n=>n.x+n.w))+38,maxY=Math.max(...board.nodes.map(n=>n.y+n.h))+38;
+    const w=Math.ceil(maxX-minX),h=Math.ceil(maxY-minY);
+    const lines=board.edges.map(edge=>{
+      const d=edgeD(edge);if(!d)return '';
+      return `<path d="${xmlEscape(d)}" stroke="#64748b" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ${edge.direction==='none'?'':`marker-end="url(#exportArrow)" ${edge.direction==='both'?'marker-start="url(#exportArrow)"':''}`}/>`;
+    }).join('');
+    const nodes=board.nodes.map(n=>{
+      const link=validURL(n.url);
+      const icon=link?`<g transform="translate(${n.x+n.w-25} ${n.y+8})"><rect width="17" height="17" rx="4" fill="#fff" stroke="#a0b9e5"/><path d="M 6 11 L 12 5 M 8 5 H 12 V 9" fill="none" stroke="#3155bf" stroke-width="1.4"/></g>`:'';
+      const content=`${svgShape(n)}${svgText(n)}${icon}`;
+      return link?`<a href="${xmlEscape(link)}" target="_blank">${content}</a>`:content;
+    }).join('');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="${ns}" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="${minX} ${minY} ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Mindflow board"><defs><marker id="exportArrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M1 1 L11 6 L1 11" fill="none" stroke="#64748b" stroke-width="1.7" stroke-linejoin="round"/></marker></defs><rect x="${minX}" y="${minY}" width="${w}" height="${h}" fill="#f8fafd"/><g font-family="Arial, sans-serif">${lines}${nodes}</g></svg>`;
+  }
+  async function createPNGBlob() {
+    const svg=exportSVGString();const data=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(data);
+    const img=new Image();
+    try {
+      await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('Could not render SVG as an image.'));img.src=url;});
+      // 2x for crisp PNG, with a 14 megapixel cap to avoid mobile OOM.
+      const upscale=Math.min(2,Math.sqrt(14000000/(img.width*img.height)));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(img.width*upscale));
+      canvas.height=Math.max(1,Math.round(img.height*upscale));
+      const ctx=canvas.getContext('2d');if(!ctx)throw Error('Canvas is unavailable.');
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      // Safari supports toBlob in modern releases; fallback to dataURL if needed.
+      if(canvas.toBlob)return await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Could not create PNG.')),'image/png'));
+      const base64=canvas.toDataURL('image/png').split(',')[1];
+      const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
+      return new Blob([bytes],{type:'image/png'});
+    }finally{URL.revokeObjectURL(url);}
+  }
+  // ===== Import safely: JSON only; never inject imported strings as HTML =====
+  $('fileInput').addEventListener('change',async e=>{
+    const file=e.target.files?.[0];e.target.value='';if(!file)return;
+    if(file.size>5_000_000){toast('JSON file is too large (maximum 5 MB).');return;}
+    let incoming;
+    try {incoming=normalize(JSON.parse(await file.text()));}
+    catch(error){toast('Import failed: '+error.message);return;}
+    if(!window.confirm(`Replace the current board with ${incoming.nodes.length} nodes and ${incoming.edges.length} connections? Export the current board first if you want to keep it.`))return;
+    board=incoming;selected=null;connectFrom=null;setTool('select');refreshPanel();applyView();saveNow();toast('Board imported successfully.');
+  });
+  $('importBtn').addEventListener('click',()=>$('fileInput').click());
+  $('exportJSON').addEventListener('click',()=>prepareExport('json'));
+  $('exportSVG').addEventListener('click',()=>prepareExport('svg'));
+  $('exportPNG').addEventListener('click',()=>prepareExport('png'));
+  $('shareFile').addEventListener('click',requestShare);
+  $('downloadFile').addEventListener('click',requestDownload);
+  $('previewFile').addEventListener('click',openExportPreview);
+  $('copyExport').addEventListener('click',copyExportJSON);
+  $('closeExport').addEventListener('click',closeExport);
+  $('exportOverlay').addEventListener('click',e=>{if(e.target===$('exportOverlay'))closeExport();});
+  // Dismissible dropdowns with no dependency on Tailwind's JavaScript.
+  function closeMenus(){for(const menu of document.querySelectorAll('.menu'))menu.classList.remove('open');for(const id of ['shapeMenuBtn','exportMenuBtn'])$(id).setAttribute('aria-expanded','false');}
+  function positionMenu(button,menu){
+    const r=button.getBoundingClientRect();
+    const menuWidth=menu.getBoundingClientRect().width;
+    const menuHeight=menu.getBoundingClientRect().height;
+    const left=clamp(r.left,8,Math.max(8,window.innerWidth-menuWidth-8));
+    const below=r.bottom+7;
+    const top=below+menuHeight>window.innerHeight-8?Math.max(8,r.top-menuHeight-7):below;
+    menu.style.setProperty('--menu-top',top+'px');
+    menu.style.setProperty('--menu-left',left+'px');
+  }
+  for(const [button,menu] of [['shapeMenuBtn','shapeMenu'],['exportMenuBtn','exportMenu']])$(button).addEventListener('click',e=>{
+    e.stopPropagation();const open=$(menu).classList.contains('open');closeMenus();if(!open){$(menu).classList.add('open');positionMenu($(button),$(menu));$(button).setAttribute('aria-expanded','true');}
+  });
+  document.addEventListener('pointerdown',e=>{if(!e.target.closest('.menu-wrap'))closeMenus();});
+  window.addEventListener('pagehide',()=>{if(saveTimer)saveNow();});
+  window.addEventListener('resize',()=>{applyView();closeMenus();});
+  // ===== Boot. On first visit, show a tiny editable example board. =====
+  let loadedExisting=false;
+  try {
+    const stored=localStorage.getItem(STORAGE_KEY);
+    if(stored){board=normalize(JSON.parse(stored));loadedExisting=true;}
+    else {board=seed();saveNow();}
+  }catch(e) {board=seed();toast('Could not load stored board. Export backups regularly.');}
+  renderNodes();refreshPanel();
+  if(!loadedExisting)fitBoard();else applyView();
+})();
+</script>
+</body>
+</html>
